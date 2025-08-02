@@ -5,28 +5,45 @@ import nltk
 from nltk.corpus import stopwords
 from nltk.stem.porter import PorterStemmer
 
-# Download NLTK resources if not present
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt', quiet=True)
+# Enhanced NLTK downloads for Render deployment
+@st.cache_resource
+def download_nltk_data():
+    try:
+        # Download required NLTK data
+        nltk.download('punkt', quiet=True)
+        nltk.download('punkt_tab', quiet=True)  # New requirement
+        nltk.download('stopwords', quiet=True)
+        return True
+    except Exception as e:
+        st.error(f"Failed to download NLTK data: {e}")
+        return False
 
-try:
-    nltk.data.find('corpora/stopwords')
-except LookupError:
-    nltk.download('stopwords', quiet=True)
+# Download NLTK data
+download_nltk_data()
 
-# Initialize stemmer and stopwords (load once for efficiency)
+# Initialize stemmer and stopwords
 ps = PorterStemmer()
-stopwords_set = set(stopwords.words('english'))
 
+@st.cache_resource
+def get_stopwords():
+    try:
+        return set(stopwords.words('english'))
+    except:
+        # Fallback if stopwords download fails
+        return set(['i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 'your', 'yours'])
+
+stopwords_set = get_stopwords()
 
 def transform_text(text):
     # Convert to lowercase
     text = text.lower()
-
-    # Tokenize
-    text = nltk.word_tokenize(text)
+    
+    # Tokenize with fallback
+    try:
+        text = nltk.word_tokenize(text)
+    except:
+        # Simple fallback tokenization if NLTK fails
+        text = text.split()
 
     # Keep only alphanumeric characters
     y = []
@@ -46,9 +63,8 @@ def transform_text(text):
     # Apply stemming
     for i in text:
         y.append(ps.stem(i))
-
+    
     return " ".join(y)
-
 
 # Load model and vectorizer
 @st.cache_resource
@@ -60,7 +76,6 @@ def load_model():
     except FileNotFoundError as e:
         st.error(f"Model files not found: {e}")
         st.stop()
-
 
 tfidf, model = load_model()
 
@@ -79,25 +94,34 @@ if st.button("🔍 Predict"):
         try:
             # 1. Preprocess
             transformed_sms = transform_text(input_sms)
-
+            
             # 2. Vectorize
             vector_input = tfidf.transform([transformed_sms])
-
+            
             # 3. Predict
             result = model.predict(vector_input)[0]
-            probability = model.predict_proba(vector_input)[0]
-
+            
+            # Check if model has predict_proba method
+            try:
+                probability = model.predict_proba(vector_input)[0]
+                confidence_available = True
+            except:
+                confidence_available = False
+            
             # 4. Display results
             if result == 1:
                 st.error("🚨 **SPAM**")
-                st.write(f"Confidence: {probability[1]:.2%}")
+                if confidence_available:
+                    st.write(f"Confidence: {probability[1]:.2%}")
             else:
                 st.success("✅ **NOT SPAM**")
-                st.write(f"Confidence: {probability[0]:.2%}")
-
+                if confidence_available:
+                    st.write(f"Confidence: {probability[0]:.2%}")
+                
         except Exception as e:
             st.error(f"An error occurred during prediction: {e}")
 
 # Add footer
 st.markdown("---")
 st.markdown("*Built with Streamlit • Deployed on Render*")
+
